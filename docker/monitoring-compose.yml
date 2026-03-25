@@ -1,0 +1,39 @@
+version: '3.8'
+
+# ============================================================
+# 모니터링 스택 — Prometheus + Grafana
+# ============================================================
+# 참고 프로젝트(loop-pack-be-l2-vol3-java) 기반으로 구성
+# Kafka 메트릭 + Spring Boot Actuator 메트릭 수집
+# ============================================================
+
+services:
+  prometheus:
+    image: prom/prometheus
+    container_name: pipeline-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./grafana/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - kafka-net
+
+  grafana:
+    image: grafana/grafana
+    container_name: pipeline-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    networks:
+      - kafka-net
+
+networks:
+  kafka-net:
+    name: docker_kafka-net
+    external: true

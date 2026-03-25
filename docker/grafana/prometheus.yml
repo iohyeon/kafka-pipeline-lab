@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # Spring Boot 앱 메트릭 (Actuator + Kafka 메트릭 포함)
+  - job_name: 'kafka-pipeline-lab'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8085']

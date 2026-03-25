@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: kafka-pipeline-lab
+
+  # ──────────────────────────────────────────────
+  # Kafka 설정
+  # ──────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: localhost:19092,localhost:29092,localhost:39092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all                    # 모든 ISR이 확인해야 성공
+      retries: 3
+      properties:
+        enable.idempotence: true   # 중복 전송 방지
+        max.in.flight.requests.per.connection: 5  # idempotence와 호환되는 최대값
+        request.timeout.ms: 20000
+        delivery.timeout.ms: 120000
+
+    consumer:
+      group-id: pipeline-default-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false    # 수동 ACK — 처리 완료 후 직접 커밋
+      properties:
+        session.timeout.ms: 60000
+        heartbeat.interval.ms: 20000
+        max.poll.interval.ms: 120000
+        max.poll.records: 500
+
+    listener:
+      ack-mode: manual             # 수동 ACK 모드
+      concurrency: 3               # 파티션 수와 맞춤
+
+  # ──────────────────────────────────────────────
+  # JPA (Phase 4: Outbox용)
+  # ──────────────────────────────────────────────
+  datasource:
+    url: jdbc:mysql://localhost:3307/pipeline?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+    username: pipeline
+    password: pipeline
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+    show-sql: true
+
+# ──────────────────────────────────────────────
+# Actuator
+# ──────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+server:
+  port: 8085    # 기존 프로젝트 포트와 충돌 방지

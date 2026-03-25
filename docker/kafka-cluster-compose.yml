@@ -1,0 +1,207 @@
+version: '3.8'
+
+# ============================================================
+# 3-Broker KRaft Kafka Cluster
+# ============================================================
+# KRaft = Kafka without ZooKeeper (Kafka 3.3+)
+# - 각 브로커가 Controller + Broker 역할 동시 수행
+# - controller.quorum.voters로 3개 노드가 투표 그룹 구성
+# - Replication Factor 3, Min ISR 2 → 1대 죽어도 운영 가능
+# ============================================================
+
+services:
+
+  # ──────────────────────────────────────────────
+  # Broker 1 (node.id=1)
+  # ──────────────────────────────────────────────
+  kafka-1:
+    image: bitnamilegacy/kafka:3.5.1
+    container_name: kafka-1
+    ports:
+      - "19092:19092"    # Host에서 접근하는 포트
+    environment:
+      # KRaft 설정
+      KAFKA_ENABLE_KRAFT: "yes"
+      KAFKA_KRAFT_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+      # Listener 설정 — 3개 리스너
+      # INTERNAL: 브로커 간 통신 (컨테이너 내부)
+      # CONTROLLER: KRaft 컨트롤러 통신
+      # EXTERNAL: Host(Spring Boot)에서 접근
+      KAFKA_CFG_LISTENERS: "INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:19092"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka-1:9092,EXTERNAL://localhost:19092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+
+      # 클러스터 기본값 — 실무 권장 설정
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "3"        # 토픽 생성 시 기본 복제 수
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: "2"               # acks=all일 때 최소 동기화 복제본 수
+      KAFKA_CFG_NUM_PARTITIONS: "3"                    # 토픽 생성 시 기본 파티션 수
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"   # __consumer_offsets 복제
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+
+      # 로그 보존
+      KAFKA_CFG_LOG_RETENTION_HOURS: "168"             # 7일
+      KAFKA_CFG_LOG_SEGMENT_BYTES: "1073741824"        # 1GB
+      KAFKA_CFG_LOG_RETENTION_CHECK_INTERVAL_MS: "300000"
+
+      # 인증 없음 (로컬 개발)
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka-1-data:/bitnami/kafka
+    networks:
+      - kafka-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ──────────────────────────────────────────────
+  # Broker 2 (node.id=2)
+  # ──────────────────────────────────────────────
+  kafka-2:
+    image: bitnamilegacy/kafka:3.5.1
+    container_name: kafka-2
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_ENABLE_KRAFT: "yes"
+      KAFKA_KRAFT_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_CFG_NODE_ID: "2"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+      KAFKA_CFG_LISTENERS: "INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:29092"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka-2:9092,EXTERNAL://localhost:29092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "3"
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: "2"
+      KAFKA_CFG_NUM_PARTITIONS: "3"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+
+      KAFKA_CFG_LOG_RETENTION_HOURS: "168"
+      KAFKA_CFG_LOG_SEGMENT_BYTES: "1073741824"
+      KAFKA_CFG_LOG_RETENTION_CHECK_INTERVAL_MS: "300000"
+
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka-2-data:/bitnami/kafka
+    networks:
+      - kafka-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ──────────────────────────────────────────────
+  # Broker 3 (node.id=3)
+  # ──────────────────────────────────────────────
+  kafka-3:
+    image: bitnamilegacy/kafka:3.5.1
+    container_name: kafka-3
+    ports:
+      - "39092:39092"
+    environment:
+      KAFKA_ENABLE_KRAFT: "yes"
+      KAFKA_KRAFT_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_CFG_NODE_ID: "3"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+      KAFKA_CFG_LISTENERS: "INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:39092"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka-3:9092,EXTERNAL://localhost:39092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "3"
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: "2"
+      KAFKA_CFG_NUM_PARTITIONS: "3"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+
+      KAFKA_CFG_LOG_RETENTION_HOURS: "168"
+      KAFKA_CFG_LOG_SEGMENT_BYTES: "1073741824"
+      KAFKA_CFG_LOG_RETENTION_CHECK_INTERVAL_MS: "300000"
+
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka-3-data:/bitnami/kafka
+    networks:
+      - kafka-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ──────────────────────────────────────────────
+  # Kafka UI — 클러스터 모니터링
+  # ──────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "9099:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "kafka-pipeline-lab"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka-1:9092,kafka-2:9092,kafka-3:9092"
+      KAFKA_CLUSTERS_0_METRICS_PORT: "9092"
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    networks:
+      - kafka-net
+
+  # ──────────────────────────────────────────────
+  # MySQL — Outbox 패턴용 (Phase 4에서 사용)
+  # ──────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: pipeline-mysql
+    ports:
+      - "3307:3306"    # 기존 프로젝트 3306과 충돌 방지
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: pipeline
+      MYSQL_USER: pipeline
+      MYSQL_PASSWORD: pipeline
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=caching_sha2_password
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - kafka-net
+
+volumes:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
+  mysql-data:
+
+networks:
+  kafka-net:
+    driver: bridge
