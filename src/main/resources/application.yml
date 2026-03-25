@@ -39,9 +39,9 @@ spring:
   # JPA (Phase 4: Outbox용)
   # ──────────────────────────────────────────────
   datasource:
-    url: jdbc:mysql://localhost:3307/pipeline?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
-    username: pipeline
-    password: pipeline
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3307}/${DB_NAME:pipeline}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+    username: ${DB_USERNAME:pipeline}
+    password: ${DB_PASSWORD:pipeline}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
