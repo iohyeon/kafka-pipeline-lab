@@ -181,7 +181,7 @@ services:
     image: mysql:8.0
     container_name: pipeline-mysql
     ports:
-      - "3307:3306"    # 기존 프로젝트 3306과 충돌 방지
+      - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: pipeline
@@ -191,8 +191,49 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --default-authentication-plugin=caching_sha2_password
+      - --binlog-format=ROW              # CDC 필수 — ROW 포맷으로 변경 전/후 이미지 기록
+      - --binlog-row-image=FULL          # 전체 컬럼 기록 (before + after)
+      - --server-id=1                    # 복제 ID (Debezium이 Slave로 연결하기 위해 필요)
+      - --log-bin=mysql-bin              # binlog 활성화
+      - --gtid-mode=ON                   # GTID 모드 (Debezium 권장)
+      - --enforce-gtid-consistency=ON    # GTID 일관성 강제
     volumes:
       - mysql-data:/var/lib/mysql
+    networks:
+      - kafka-net
+
+  # ──────────────────────────────────────────────
+  # Debezium (Kafka Connect + MySQL Connector)
+  # ──────────────────────────────────────────────
+  # Debezium = CDC 플랫폼
+  # MySQL의 binlog를 실시간 감시 → Outbox INSERT 감지 → Kafka 토픽 자동 전달
+  # Kafka Connect 위에서 동작 (Source Connector)
+  # Debezium이 MySQL의 Slave로 위장하여 binlog를 수신한다
+  debezium:
+    image: debezium/connect:2.5
+    container_name: debezium
+    ports:
+      - "8084:8083"    # Kafka Connect REST API (8083이 사용 중이라 8084로 매핑)
+    environment:
+      BOOTSTRAP_SERVERS: "kafka-1:9092,kafka-2:9092,kafka-3:9092"
+      GROUP_ID: "debezium-connect-group"
+      CONFIG_STORAGE_TOPIC: "debezium-configs"
+      OFFSET_STORAGE_TOPIC: "debezium-offsets"
+      STATUS_STORAGE_TOPIC: "debezium-status"
+      CONFIG_STORAGE_REPLICATION_FACTOR: "3"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "3"
+      STATUS_STORAGE_REPLICATION_FACTOR: "3"
+      KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
     networks:
       - kafka-net
 
