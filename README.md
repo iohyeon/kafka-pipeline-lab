@@ -10,6 +10,7 @@
 - **Messaging**: Apache Kafka 3.5.1 (KRaft, 3-Broker Cluster)
 - **Persistence**: MySQL 8.0, Spring Data JPA
 - **Monitoring**: Prometheus, Grafana, Kafka UI
+- **CDC**: Debezium (Kafka Connect) — Outbox 테이블 binlog → Kafka 자동 전달
 - **Infra**: Docker Compose (Multi-Broker + Monitoring Stack)
 
 ## Architecture Overview
@@ -127,6 +128,39 @@ key = couponId → murmur2(couponId) % 3 → 같은 파티션
 | 정합성 (stock = log) | 일치 | 일치 |
 | 발행 시간 | 247ms | 65ms |
 
+### 심화 — Transaction Phase Comparison
+
+Phase 4(Outbox)에서 발견한 `@Transactional + 비동기 콜백 충돌` 문제를 깊이 파고들어, **3가지 이벤트 발행 방식**을 구현하고 동작 차이를 실측 비교했습니다.
+
+| 방식 | 동작 | TX 롤백 시 |
+|------|------|-----------|
+| **A. BEFORE_COMMIT** | 도메인 이벤트 → 리스너가 같은 TX에서 Outbox 저장 | Outbox도 롤백 (안전) |
+| **B. AFTER_COMMIT** | TX 커밋 후 Kafka 즉시 발행 시도 | Kafka 발행 안 됨 (안전) |
+| **C. DIRECT_CALL** | Facade가 Outbox 직접 저장 → Relay가 나중에 발행 | Outbox도 롤백 (안전) |
+
+```bash
+# 3가지 방식 비교 실험
+curl -X POST http://localhost:8085/api/comparison/before-commit/1
+curl -X POST http://localhost:8085/api/comparison/after-commit/2
+curl -X POST http://localhost:8085/api/comparison/direct-call/3
+
+# 실패 시나리오 — TX 롤백 시 Outbox 상태 확인
+curl -X POST http://localhost:8085/api/comparison/before-commit-fail/4
+curl -X POST http://localhost:8085/api/comparison/direct-call-fail/5
+```
+
+### 심화 — CDC (Debezium) 인프라 검증
+
+Outbox 패턴의 궁극적 전환 경로인 **CDC(Change Data Capture)**를 Docker Compose에 구축하여 실증했습니다. MySQL binlog → Debezium → Kafka 자동 전달로, **Relay 코드 없이** Outbox INSERT가 즉시 Kafka 토픽에 도달하는 것을 확인.
+
+```bash
+# CDC 포함 클러스터 실행
+docker compose -f docker/kafka-cluster-compose.yml up -d
+
+# Debezium Connector 등록 후 Outbox INSERT → Kafka 자동 전달 확인
+# Kafka UI (localhost:9099)에서 토픽 메시지 확인
+```
+
 ## Project Structure
 
 ```
@@ -136,7 +170,8 @@ kafka-pipeline-lab/
 │   └── monitoring-compose.yml          # Prometheus + Grafana
 ├── docs/                               # 22개 실험/설계/회고 문서
 ├── src/main/java/com/pipeline/
-│   ├── api/                            # Phase별 실험 API (7개 Controller)
+│   ├── api/                            # Phase별 실험 API (8개 Controller)
+│   ├── comparison/                     # BEFORE_COMMIT vs AFTER_COMMIT vs DIRECT_CALL 비교
 │   ├── config/                         # Kafka Topic/Producer/Consumer 설정
 │   ├── consumer/                       # Manual ACK, Batch, Slow, Retryable Consumer
 │   ├── coupon/                         # 선착순 쿠폰 도메인 (Entity, Service, Consumer)
@@ -188,15 +223,54 @@ curl http://localhost:8085/api/experiment/coupon/result?couponId=1
 
 `docs/` 디렉토리에 22개의 설계/실험/회고 문서가 있습니다. 각 Phase별로 **설계 의사결정**, **실측 로그**, **트레이드오프 분석**, **버그 발견 및 해결 과정**을 기록했습니다.
 
-| 카테고리 | 문서 |
-|---------|------|
-| **Phase 설계** | Phase 1~7 각각의 설계 문서 (7개) |
-| **실험 기록** | Phase별 실측 로그, 시간 분석, 시퀀스 다이어그램 (6개) |
-| **트레이드오프** | Outbox 동기/비동기/CDC 비교, 멱등성 Redis vs DB (3개) |
-| **설계 심화** | @Transactional + 비동기 콜백 충돌, 토픽 구조 설계 (2개) |
-| **멘토링 인사이트** | 7개 팀 질문 + 멘토 답변 종합 (1개) |
-| **종합 회고** | Phase 1~3, Phase 1~7 전체 회고 (2개) |
-| **실행 가이드** | 전체 명령어 + 포트 정리 (1개) |
+### Phase 설계 문서 (7개)
+
+| Phase | 문서 |
+|-------|------|
+| 1 | [멀티 브로커 KRaft 클러스터 구축](docs/Phase%201%20—%20멀티%20브로커%20KRaft%20클러스터%20구축.md) |
+| 2 | [Producer 심화 (acks, idempotence, key 라우팅)](docs/Phase%202%20—%20Producer%20심화%20(acks,%20idempotence,%20key%20라우팅).md) |
+| 3 | [Consumer 심화 (리밸런싱, Manual ACK, Batch, LAG)](docs/Phase%203%20—%20Consumer%20심화%20(리밸런싱,%20Manual%20ACK,%20Batch,%20LAG).md) |
+| 4 | [Transactional Outbox 패턴 구현](docs/Phase%204%20—%20Transactional%20Outbox%20패턴%20구현.md) |
+| 5 | [멱등성 처리 (event_handled + 같은 TX)](docs/Phase%205%20—%20멱등성%20처리%20(event_handled%20+%20같은%20TX).md) |
+| 6 | [DLQ + 에러 핸들링 (재시도, 지수 백오프, 격리)](docs/Phase%206%20—%20DLQ%20+%20에러%20핸들링%20(재시도,%20지수%20백오프,%20격리).md) |
+| 7 | [실전 선착순 쿠폰 발급 (동시성 테스트 + 전체 통합)](docs/Phase%207%20—%20실전%20선착순%20쿠폰%20발급%20(동시성%20테스트%20+%20전체%20통합).md) |
+
+### 실험 기록 (7개)
+
+| 문서 | 내용 |
+|------|------|
+| [Phase 1 히스토리](docs/Phase%201%20히스토리%20—%20클러스터%20구축%20과정%20기록.md) | 클러스터 구축 과정 기록 |
+| [Phase 2 히스토리](docs/Phase%202%20히스토리%20—%20Producer%20심화%20실험%20기록.md) | Producer acks 벌크 1000건 실측 |
+| [Phase 3 히스토리](docs/Phase%203%20히스토리%20—%20Consumer%20심화%20실험%20기록.md) | Consumer LAG 적체/복구 실측 |
+| [Phase 5 실험 기록](docs/Phase%205%20실험%20기록%20—%20멱등성%20중복%20감지%20실측%20상세.md) | 10건 동일 eventId → 1건 처리 실측 |
+| [Phase 6 실험 기록](docs/Phase%206%20실험%20기록%20—%20DLQ%20재시도와%20격리%20실측%20상세.md) | DLQ 재시도 + 지수 백오프 실측 |
+| [Phase 7 실험 기록](docs/Phase%207%20실험%20기록%20—%20선착순%20쿠폰%20동시성%20테스트%20실측%20상세.md) | 200명/1000명 동시성 테스트 실측 |
+| [Phase 7 실험 로그](docs/Phase%207%20실험%20로그%20—%20선착순%20쿠폰%20전체%20로그%20+%20DB%20상태%20+%20Kafka%20상태.md) | 전체 로그 + DB/Kafka 상태 스냅샷 |
+
+### 트레이드오프 분석 (3개)
+
+| 문서 | 핵심 |
+|------|------|
+| [Outbox Relay 동기 vs 비동기 vs CDC](docs/Outbox%20Relay%20동기%20vs%20비동기%20vs%20CDC%20—%20실무%20판단%20기준.md) | 3가지 방식 비교 + 실무 판단 기준 |
+| [Outbox Relay 최종 트레이드오프](docs/Outbox%20Relay%20최종%20트레이드오프%20—%20동기%20Polling이%20맞는%20이유.md) | 동기 Polling 선택 근거 |
+| [@Transactional 경계 문제 심화](docs/Outbox%20Relay의%20비동기%20vs%20동기%20—%20@Transactional%20경계%20문제%20심화.md) | 비동기 콜백이 TX 밖에서 실행되는 문제 |
+
+### 설계 심화 + 멘토링 + 회고 (5개)
+
+| 문서 | 내용 |
+|------|------|
+| [Kafka 토픽 구조 설계](docs/Kafka%20토픽%20구조%20설계%20—%20kafka-pipeline-lab.md) | 네이밍 컨벤션, 파티션 전략 |
+| [멘토링 인사이트](docs/멘토링%20인사이트%20—%20Outbox%20원자성,%20팀별%20질문과%20케브님%20답변%20종합.md) | 7개 팀 질문 + 멘토 답변 종합 |
+| [종합 회고 Phase 1~3](docs/종합%20회고%20—%20Phase%201~3%20(인프라%20→%20Producer%20→%20Consumer).md) | 인프라 → Producer → Consumer |
+| [종합 회고 Phase 1~7](docs/종합%20회고%20—%20Phase%201~7%20전체%20(Kafka%20파이프라인%20완성).md) | Kafka 파이프라인 전체 완성 |
+| [실행 가이드](docs/실행%20가이드%20—%20kafka-pipeline-lab%20전체%20명령어.md) | 전체 명령어 + 포트 정리 |
+
+## 관련 프로젝트
+
+| 프로젝트 | 범위 | GitHub |
+|---------|------|--------|
+| **kafka-pipeline-lab** (현재) | 단일 서비스 Kafka 패턴 — Outbox, 멱등성, DLQ, 선착순 쿠폰 | [iohyeon/kafka-pipeline-lab](https://github.com/iohyeon/kafka-pipeline-lab) |
+| **kafka-eda-lab** | 멀티 서비스 EDA 패턴 — 코레오그래피, Saga, Kafka Streams | [iohyeon/kafka-eda-lab](https://github.com/iohyeon/kafka-eda-lab) |
 
 ## Security Notice
 
@@ -220,3 +294,5 @@ curl http://localhost:8085/api/experiment/coupon/result?couponId=1
 | 멱등성 저장소 | DB (event_handled) | 비즈니스 TX와 원자적 롤백 필요, Redis SET NX의 재처리 불가 문제 회피 |
 | 쿠폰 Partition Key | couponId | 같은 쿠폰 = 같은 파티션 = 순차 처리 = Lock-free 동시성 제어 |
 | 재시도 전략 | 3회 + 지수 백오프 | 일시적 장애 복구 대기, DLQ로 영구 실패 격리 |
+| CDC 인프라 | Debezium (검증 완료) | Outbox Polling → CDC 전환 경로의 실증. binlog → Kafka 자동 전달 확인 |
+| 이벤트 발행 방식 | DIRECT_CALL (Outbox) | BEFORE_COMMIT/AFTER_COMMIT과 비교 후, 명시성과 디버깅 용이성 우선 |
