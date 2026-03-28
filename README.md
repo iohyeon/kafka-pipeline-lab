@@ -221,7 +221,7 @@ curl http://localhost:8085/api/experiment/coupon/result?couponId=1
 
 ## Documentation
 
-`docs/` 디렉토리에 22개의 설계/실험/회고 문서가 있습니다. 각 Phase별로 **설계 의사결정**, **실측 로그**, **트레이드오프 분석**, **버그 발견 및 해결 과정**을 기록했습니다.
+`docs/` 디렉토리에 24개의 설계/실험/회고 문서가 있습니다. 각 Phase별로 **설계 의사결정**, **실측 로그**, **트레이드오프 분석**, **버그 발견 및 해결 과정**을 기록했습니다.
 
 ### Phase 설계 문서 (7개)
 
@@ -254,6 +254,13 @@ curl http://localhost:8085/api/experiment/coupon/result?couponId=1
 | [Outbox Relay 동기 vs 비동기 vs CDC](docs/Outbox%20Relay%20동기%20vs%20비동기%20vs%20CDC%20—%20실무%20판단%20기준.md) | 3가지 방식 비교 + 실무 판단 기준 |
 | [Outbox Relay 최종 트레이드오프](docs/Outbox%20Relay%20최종%20트레이드오프%20—%20동기%20Polling이%20맞는%20이유.md) | 동기 Polling 선택 근거 |
 | [@Transactional 경계 문제 심화](docs/Outbox%20Relay의%20비동기%20vs%20동기%20—%20@Transactional%20경계%20문제%20심화.md) | 비동기 콜백이 TX 밖에서 실행되는 문제 |
+
+### 심화 분석 (2개)
+
+| 문서 | 핵심 |
+|------|------|
+| [Transaction Phase Comparison](docs/심화%20—%20Transaction%20Phase%20Comparison%20(BEFORE_COMMIT%20vs%20AFTER_COMMIT%20vs%20DIRECT_CALL).md) | 3가지 이벤트 발행 방식 구현 + 실패 시나리오 비교 |
+| [CDC (Debezium) 인프라 검증](docs/심화%20—%20CDC%20(Debezium)%20인프라%20검증%20—%20Outbox%20Relay%20없이%20binlog→Kafka%20자동%20전달.md) | Outbox Polling → CDC 전환 경로 실증 |
 
 ### 설계 심화 + 멘토링 + 회고 (5개)
 
