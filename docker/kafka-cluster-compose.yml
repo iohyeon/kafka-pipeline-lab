@@ -19,10 +19,7 @@ services:
     container_name: kafka-1
     ports:
       - "19092:19092"    # Host에서 접근하는 포트
-      - "17071:7071"     # JMX Exporter (Prometheus 수집용)
     environment:
-      # JMX Exporter — Kafka 내부 메트릭을 Prometheus 형식으로 노출
-      KAFKA_OPTS: "-javaagent:/opt/jmx-exporter/jmx_prometheus_javaagent-0.20.0.jar=7071:/opt/jmx-exporter/kafka-jmx-config.yml"
       # KRaft 설정
       KAFKA_ENABLE_KRAFT: "yes"
       KAFKA_KRAFT_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
@@ -57,7 +54,6 @@ services:
       ALLOW_PLAINTEXT_LISTENER: "yes"
     volumes:
       - kafka-1-data:/bitnami/kafka
-      - ./jmx-exporter:/opt/jmx-exporter
     networks:
       - kafka-net
     healthcheck:
@@ -75,9 +71,7 @@ services:
     container_name: kafka-2
     ports:
       - "29092:29092"
-      - "27071:7071"     # JMX Exporter
     environment:
-      KAFKA_OPTS: "-javaagent:/opt/jmx-exporter/jmx_prometheus_javaagent-0.20.0.jar=7071:/opt/jmx-exporter/kafka-jmx-config.yml"
       KAFKA_ENABLE_KRAFT: "yes"
       KAFKA_KRAFT_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
       KAFKA_CFG_NODE_ID: "2"
@@ -104,7 +98,6 @@ services:
       ALLOW_PLAINTEXT_LISTENER: "yes"
     volumes:
       - kafka-2-data:/bitnami/kafka
-      - ./jmx-exporter:/opt/jmx-exporter
     networks:
       - kafka-net
     healthcheck:
@@ -122,9 +115,7 @@ services:
     container_name: kafka-3
     ports:
       - "39092:39092"
-      - "37071:7071"     # JMX Exporter
     environment:
-      KAFKA_OPTS: "-javaagent:/opt/jmx-exporter/jmx_prometheus_javaagent-0.20.0.jar=7071:/opt/jmx-exporter/kafka-jmx-config.yml"
       KAFKA_ENABLE_KRAFT: "yes"
       KAFKA_KRAFT_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
       KAFKA_CFG_NODE_ID: "3"
@@ -151,7 +142,6 @@ services:
       ALLOW_PLAINTEXT_LISTENER: "yes"
     volumes:
       - kafka-3-data:/bitnami/kafka
-      - ./jmx-exporter:/opt/jmx-exporter
     networks:
       - kafka-net
     healthcheck:
