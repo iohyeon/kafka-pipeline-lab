@@ -1,0 +1,79 @@
+---
+# Kafka Broker JMX Exporter 설정
+# Prometheus가 수집할 핵심 메트릭만 선별 (전체 노출 시 메트릭 폭발)
+
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+rules:
+  # ── 브로커 처리량 ──
+  # 초당 메시지 수 (Broker 전체)
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=MessagesInPerSec><>Count"
+    name: "kafka_server_broker_topic_metrics_messages_in_total"
+    type: COUNTER
+
+  # 초당 바이트 수 (In/Out)
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=BytesInPerSec><>Count"
+    name: "kafka_server_broker_topic_metrics_bytes_in_total"
+    type: COUNTER
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=BytesOutPerSec><>Count"
+    name: "kafka_server_broker_topic_metrics_bytes_out_total"
+    type: COUNTER
+
+  # ── 토픽별 처리량 ──
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=MessagesInPerSec, topic=(.+)><>Count"
+    name: "kafka_server_broker_topic_messages_in_total"
+    type: COUNTER
+    labels:
+      topic: "$1"
+
+  # ── 요청 레이턴시 ──
+  - pattern: "kafka.network<type=RequestMetrics, name=TotalTimeMs, request=(.+)><>(Mean|99thPercentile)"
+    name: "kafka_network_request_total_time_ms"
+    type: GAUGE
+    labels:
+      request: "$1"
+      quantile: "$2"
+
+  # ── Consumer Group Lag ──
+  - pattern: "kafka.server<type=FetcherLagMetrics, name=ConsumerLag, clientId=(.+), topic=(.+), partition=(.+)><>Value"
+    name: "kafka_server_consumer_lag"
+    type: GAUGE
+    labels:
+      client_id: "$1"
+      topic: "$2"
+      partition: "$3"
+
+  # ── 파티션 상태 ──
+  # Under-replicated partitions (0이 정상)
+  - pattern: "kafka.server<type=ReplicaManager, name=UnderReplicatedPartitions><>Value"
+    name: "kafka_server_under_replicated_partitions"
+    type: GAUGE
+
+  # ISR 축소/확장 (급변하면 문제)
+  - pattern: "kafka.server<type=ReplicaManager, name=IsrShrinksPerSec><>Count"
+    name: "kafka_server_isr_shrinks_total"
+    type: COUNTER
+  - pattern: "kafka.server<type=ReplicaManager, name=IsrExpandsPerSec><>Count"
+    name: "kafka_server_isr_expands_total"
+    type: COUNTER
+
+  # 파티션 수
+  - pattern: "kafka.server<type=ReplicaManager, name=PartitionCount><>Value"
+    name: "kafka_server_partition_count"
+    type: GAUGE
+
+  # 리더 파티션 수
+  - pattern: "kafka.server<type=ReplicaManager, name=LeaderCount><>Value"
+    name: "kafka_server_leader_count"
+    type: GAUGE
+
+  # ── Controller 상태 ──
+  - pattern: "kafka.controller<type=KafkaController, name=ActiveControllerCount><>Value"
+    name: "kafka_controller_active_count"
+    type: GAUGE
+
+  # ── 로그 세그먼트 ──
+  - pattern: "kafka.log<type=LogManager, name=LogDirectoryOffline><>Value"
+    name: "kafka_log_directory_offline"
+    type: GAUGE

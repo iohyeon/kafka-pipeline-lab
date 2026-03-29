@@ -2,8 +2,18 @@ global:
   scrape_interval: 5s
 
 scrape_configs:
-  # Spring Boot 앱 메트릭 (Actuator + Kafka 메트릭 포함)
+  # Spring Boot 앱 메트릭 (Actuator + Kafka Client 메트릭)
   - job_name: 'kafka-pipeline-lab'
     metrics_path: '/actuator/prometheus'
     static_configs:
       - targets: ['host.docker.internal:8085']
+
+  # Kafka Broker JMX 메트릭 (3 Brokers)
+  - job_name: 'kafka-brokers'
+    static_configs:
+      - targets:
+          - 'kafka-1:7071'
+          - 'kafka-2:7071'
+          - 'kafka-3:7071'
+        labels:
+          cluster: 'kafka-pipeline-lab'

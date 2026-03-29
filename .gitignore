@@ -21,3 +21,9 @@ logs/
 
 # Env
 .env
+
+# JMX Exporter JAR (download-jmx-exporter.sh로 받기)
+docker/jmx-exporter/*.jar
+
+# 부하테스트 결과
+load-test/results/

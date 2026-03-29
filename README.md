@@ -4,6 +4,8 @@
 
 단순히 Kafka를 연동하는 수준이 아닌, 실무에서 마주치는 **정합성 문제**(DB-Kafka 원자성), **동시성 제어**(Lock-free 순차 처리), **장애 복구**(DLQ + 재시도), **중복 처리 방지**(Consumer 멱등성)를 직접 설계하고 실측 데이터로 검증했습니다.
 
+**부하테스트(k6) + 모니터링(Prometheus/Grafana)**으로 시스템 한계를 실측하고, 병목을 식별하여 튜닝하는 운영 관점까지 포함합니다.
+
 ## Tech Stack
 
 - **Runtime**: Java 21, Spring Boot 3.4.4
@@ -11,7 +13,8 @@
 - **Persistence**: MySQL 8.0, Spring Data JPA
 - **Monitoring**: Prometheus, Grafana, Kafka UI
 - **CDC**: Debezium (Kafka Connect) — Outbox 테이블 binlog → Kafka 자동 전달
-- **Infra**: Docker Compose (Multi-Broker + Monitoring Stack)
+- **Load Test**: k6 (3 시나리오: Baseline, Concurrency, Spike)
+- **Infra**: Docker Compose (Multi-Broker + JMX Exporter + Monitoring Stack)
 
 ## Architecture Overview
 
@@ -161,14 +164,50 @@ docker compose -f docker/kafka-cluster-compose.yml up -d
 # Kafka UI (localhost:9099)에서 토픽 메시지 확인
 ```
 
+### 심화 — 부하테스트 + 모니터링
+
+k6로 부하를 생성하고, Prometheus가 수집한 메트릭을 Grafana 대시보드에서 실시간 관찰.
+
+| 시나리오 | VUs | 시간 | 목적 |
+|---------|-----|------|------|
+| **Baseline** | 10→50 (점진) | 3분 30초 | 기본 TPS, Latency, Error Rate |
+| **Concurrency** | 100→500 (급증) | 1분 10초 | DB 커넥션 풀 + Producer 병목 |
+| **Spike** | 20→**200**→20→**200** | 4분 30초 | 급증/복구 사이클, Consumer Lag 관찰 |
+
+```bash
+# 전체 실행
+bash load-test/run-all.sh
+
+# 개별 실행
+k6 run load-test/01-outbox-baseline.js
+k6 run load-test/02-coupon-concurrency.js
+k6 run load-test/03-spike-test.js
+```
+
+Grafana 대시보드 (자동 프로비저닝): http://localhost:3000 — 16개 패널
+- Spring Boot: HTTP TPS, Latency(p95/p99), Error Rate
+- Kafka Producer: Send Rate, Request Latency, Errors/Retries
+- Kafka Consumer: Consumed Rate, **Consumer Lag**, Commit Rate
+- Kafka Broker (JMX): Messages In, Under-Replicated, Produce p99
+- JVM: Heap Usage, HikariCP Connections, GC Pause
+
+상세 가이드: [docs/부하테스트 + 모니터링 가이드](docs/심화%20—%20부하테스트%20+%20모니터링%20가이드%20(k6,%20Prometheus,%20Grafana).md)
+
 ## Project Structure
 
 ```
 kafka-pipeline-lab/
+├── load-test/                          # k6 부하테스트 시나리오
+│   ├── 01-outbox-baseline.js           # Steady Load (50 VU, 3분 30초)
+│   ├── 02-coupon-concurrency.js        # Concurrency Stress (500 VU)
+│   ├── 03-spike-test.js                # Spike Test (200 VU 급증)
+│   └── run-all.sh                      # 전체 실행 스크립트
 ├── docker/
-│   ├── kafka-cluster-compose.yml       # 3-Broker KRaft + Kafka UI + MySQL
-│   └── monitoring-compose.yml          # Prometheus + Grafana
-├── docs/                               # 22개 실험/설계/회고 문서
+│   ├── kafka-cluster-compose.yml       # 3-Broker KRaft + Kafka UI + MySQL + JMX Exporter
+│   ├── monitoring-compose.yml          # Prometheus + Grafana
+│   ├── jmx-exporter/                   # Kafka JMX Exporter 설정 + JAR
+│   └── grafana/provisioning/dashboards/ # 대시보드 JSON (16패널, 자동 프로비저닝)
+├── docs/                               # 25개 실험/설계/회고 문서
 ├── src/main/java/com/pipeline/
 │   ├── api/                            # Phase별 실험 API (8개 Controller)
 │   ├── comparison/                     # BEFORE_COMMIT vs AFTER_COMMIT vs DIRECT_CALL 비교
@@ -221,7 +260,7 @@ curl http://localhost:8085/api/experiment/coupon/result?couponId=1
 
 ## Documentation
 
-`docs/` 디렉토리에 24개의 설계/실험/회고 문서가 있습니다. 각 Phase별로 **설계 의사결정**, **실측 로그**, **트레이드오프 분석**, **버그 발견 및 해결 과정**을 기록했습니다.
+`docs/` 디렉토리에 25개의 설계/실험/회고 문서가 있습니다. 각 Phase별로 **설계 의사결정**, **실측 로그**, **트레이드오프 분석**, **버그 발견 및 해결 과정**을 기록했습니다.
 
 ### Phase 설계 문서 (7개)
 
@@ -261,6 +300,7 @@ curl http://localhost:8085/api/experiment/coupon/result?couponId=1
 |------|------|
 | [Transaction Phase Comparison](docs/심화%20—%20Transaction%20Phase%20Comparison%20(BEFORE_COMMIT%20vs%20AFTER_COMMIT%20vs%20DIRECT_CALL).md) | 3가지 이벤트 발행 방식 구현 + 실패 시나리오 비교 |
 | [CDC (Debezium) 인프라 검증](docs/심화%20—%20CDC%20(Debezium)%20인프라%20검증%20—%20Outbox%20Relay%20없이%20binlog→Kafka%20자동%20전달.md) | Outbox Polling → CDC 전환 경로 실증 |
+| [부하테스트 + 모니터링 가이드](docs/심화%20—%20부하테스트%20+%20모니터링%20가이드%20(k6,%20Prometheus,%20Grafana).md) | k6 3 시나리오 + Grafana 16패널 대시보드 + 병목 식별 |
 
 ### 설계 심화 + 멘토링 + 회고 (5개)
 
