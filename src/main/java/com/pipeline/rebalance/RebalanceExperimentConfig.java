@@ -19,14 +19,17 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Eager vs Cooperative 리밸런싱 실험용 Factory 설정
+ * 리밸런싱 실험용 Factory 설정 — 3가지 전략 비교
  *
- * 두 Factory의 유일한 차이: partition.assignment.strategy
- * - eagerRebalanceFactory    → RangeAssignor (Eager 프로토콜)
- * - cooperativeRebalanceFactory → CooperativeStickyAssignor (Incremental Cooperative)
+ * 1. eagerRebalanceFactory        → RangeAssignor (Eager 프로토콜)
+ * 2. cooperativeRebalanceFactory  → CooperativeStickyAssignor (Incremental Cooperative)
+ * 3. staticMembershipFactory      → CooperativeStickyAssignor + group.instance.id (Static Membership, KIP-345)
  *
- * 리밸런싱 발생 시 ConsumerRebalanceListener가 이벤트를 RebalanceEventLog에 기록한다.
- * session.timeout.ms=10초로 설정하여 장애 감지를 빠르게 한다.
+ * Static Membership의 핵심:
+ * - group.instance.id를 설정하면 컨슈머가 "정적 멤버"가 된다
+ * - 컨슈머가 떠나도 session.timeout.ms 동안 브로커가 파티션 할당을 유지
+ * - 같은 instance.id로 돌아오면 리밸런싱 없이 같은 파티션을 즉시 돌려받음
+ * - group.instance.id는 @KafkaListener의 properties 속성으로 컨슈머별 개별 설정
  */
 @Slf4j
 @Configuration
@@ -93,6 +96,32 @@ public class RebalanceExperimentConfig {
         factory.setConsumerFactory(cf);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
         factory.getContainerProperties().setConsumerRebalanceListener(rebalanceListener("COOPERATIVE"));
+        return factory;
+    }
+
+    // ──────────────────────────────────────────────
+    // Static Membership (KIP-345) — Kafka 2.3+
+    // group.instance.id 설정 시 session.timeout.ms 동안 파티션 할당 유지
+    // 컨슈머가 돌아오면 리밸런싱 없이 같은 파티션 복귀
+    // ──────────────────────────────────────────────
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, byte[]> staticMembershipFactory() {
+        Map<String, Object> configs = baseConfigs();
+        configs.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
+                "org.apache.kafka.clients.consumer.CooperativeStickyAssignor");
+        // Static Membership: session.timeout.ms를 길게 설정 = 복귀 대기 시간
+        // 컨슈머가 떠나도 45초 동안 파티션 할당을 유지한다
+        configs.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 45000);   // 45초
+        configs.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 5000); // 5초
+        // group.instance.id는 @KafkaListener(properties=...)로 컨슈머별 설정
+
+        ConsumerFactory<String, byte[]> cf = new DefaultKafkaConsumerFactory<>(configs);
+
+        ConcurrentKafkaListenerContainerFactory<String, byte[]> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(cf);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+        factory.getContainerProperties().setConsumerRebalanceListener(rebalanceListener("STATIC"));
         return factory;
     }
 

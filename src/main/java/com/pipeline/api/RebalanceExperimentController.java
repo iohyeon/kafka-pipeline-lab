@@ -36,6 +36,7 @@ public class RebalanceExperimentController {
     private static final String TOPIC = "rebalance.experiment-v1";
     private static final List<String> EAGER_IDS = List.of("eager-0", "eager-1", "eager-2");
     private static final List<String> COOP_IDS = List.of("coop-0", "coop-1", "coop-2");
+    private static final List<String> STATIC_IDS = List.of("static-0", "static-1", "static-2");
 
     // ──────────────────────────────────────────────
     // 컨슈머 시작/중지
@@ -48,7 +49,11 @@ public class RebalanceExperimentController {
      */
     @PostMapping("/start/{protocol}")
     public Map<String, Object> startConsumers(@PathVariable String protocol) {
-        List<String> ids = protocol.equals("eager") ? EAGER_IDS : COOP_IDS;
+        List<String> ids = switch (protocol) {
+            case "eager" -> EAGER_IDS;
+            case "static" -> STATIC_IDS;
+            default -> COOP_IDS;
+        };
         List<String> started = new ArrayList<>();
 
         for (String id : ids) {
@@ -63,6 +68,11 @@ public class RebalanceExperimentController {
         result.put("protocol", protocol);
         result.put("started", started);
         result.put("assignmentStrategy", protocol.equals("eager") ? "RangeAssignor" : "CooperativeStickyAssignor");
+        if (protocol.equals("static")) {
+            result.put("staticMembership", true);
+            result.put("sessionTimeoutMs", 45000);
+            result.put("설명", "group.instance.id 설정됨. 컨슈머가 떠나도 45초 동안 리밸런싱 없이 대기.");
+        }
         return result;
     }
 
@@ -154,14 +164,10 @@ public class RebalanceExperimentController {
      */
     @GetMapping("/log")
     public Map<String, Object> getLog() {
-        List<RebalanceEvent> eagerEvents = eventLog.getByProtocol("EAGER");
-        List<RebalanceEvent> coopEvents = eventLog.getByProtocol("COOPERATIVE");
-
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("EAGER", buildProtocolSummary(eagerEvents));
-        result.put("COOPERATIVE", buildProtocolSummary(coopEvents));
-        result.put("비교_포인트", "EAGER의 REVOKED에는 파티션이 포함(stop-the-world). " +
-                "COOPERATIVE의 REVOKED는 빈 리스트(무중단).");
+        result.put("EAGER", buildProtocolSummary(eventLog.getByProtocol("EAGER")));
+        result.put("COOPERATIVE", buildProtocolSummary(eventLog.getByProtocol("COOPERATIVE")));
+        result.put("STATIC", buildProtocolSummary(eventLog.getByProtocol("STATIC")));
         return result;
     }
 
@@ -188,6 +194,7 @@ public class RebalanceExperimentController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("eager_group", getGroupStatus(EAGER_IDS));
         result.put("cooperative_group", getGroupStatus(COOP_IDS));
+        result.put("static_group", getGroupStatus(STATIC_IDS));
         return result;
     }
 

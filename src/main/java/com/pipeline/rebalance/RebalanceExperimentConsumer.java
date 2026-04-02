@@ -100,6 +100,46 @@ public class RebalanceExperimentConsumer {
     }
 
     // ──────────────────────────────────────────────
+    // Static Membership Group (KIP-345)
+    // CooperativeStickyAssignor + group.instance.id
+    // 컨슈머가 떠나도 session.timeout.ms(45초) 동안 리밸런싱 없이 대기
+    // 같은 instance.id로 복귀하면 같은 파티션을 즉시 돌려받음
+    // ──────────────────────────────────────────────
+
+    @KafkaListener(
+            id = "static-0", topics = TOPIC,
+            groupId = "rebalance-static-group",
+            containerFactory = "staticMembershipFactory",
+            properties = {"group.instance.id=static-instance-0"},
+            autoStartup = "false"
+    )
+    public void static0(ConsumerRecord<String, byte[]> record, Acknowledgment ack) {
+        processAndAck("static-0", record, ack);
+    }
+
+    @KafkaListener(
+            id = "static-1", topics = TOPIC,
+            groupId = "rebalance-static-group",
+            containerFactory = "staticMembershipFactory",
+            properties = {"group.instance.id=static-instance-1"},
+            autoStartup = "false"
+    )
+    public void static1(ConsumerRecord<String, byte[]> record, Acknowledgment ack) {
+        processAndAck("static-1", record, ack);
+    }
+
+    @KafkaListener(
+            id = "static-2", topics = TOPIC,
+            groupId = "rebalance-static-group",
+            containerFactory = "staticMembershipFactory",
+            properties = {"group.instance.id=static-instance-2"},
+            autoStartup = "false"
+    )
+    public void static2(ConsumerRecord<String, byte[]> record, Acknowledgment ack) {
+        processAndAck("static-2", record, ack);
+    }
+
+    // ──────────────────────────────────────────────
 
     private void processAndAck(String consumerId, ConsumerRecord<String, byte[]> record, Acknowledgment ack) {
         log.info("[{}] 처리 — partition={}, offset={}, key={}",
