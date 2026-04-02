@@ -57,6 +57,19 @@ public class KafkaTopicConfig {
     }
 
     /**
+     * 리밸런싱 실험 토픽 — Eager vs Cooperative 비교용
+     * - 파티션 3개 = 컨슈머 3개와 1:1 매핑
+     */
+    @Bean
+    public NewTopic rebalanceExperimentTopic() {
+        return TopicBuilder.name("rebalance.experiment-v1")
+                .partitions(3)
+                .replicas(3)
+                .config("min.insync.replicas", "2")
+                .build();
+    }
+
+    /**
      * DLQ (Dead Letter Queue) — Phase 6에서 활용
      * - 처리 실패한 메시지가 격리되는 토픽
      * - 파티션 1개로 충분 (실패 메시지는 소량)

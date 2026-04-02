@@ -223,6 +223,7 @@ kafka-pipeline-lab/
 │   ├── comparison/                     # BEFORE_COMMIT vs AFTER_COMMIT vs DIRECT_CALL 비교
 │   ├── config/                         # Kafka Topic/Producer/Consumer 설정
 │   ├── consumer/                       # Manual ACK, Batch, Slow, Retryable Consumer
+│   ├── rebalance/                      # Eager vs Cooperative 리밸런싱 비교 실험
 │   ├── coupon/                         # 선착순 쿠폰 도메인 (Entity, Service, Consumer)
 │   ├── dlq/                            # DLQ Publisher + Monitor Consumer
 │   ├── idempotency/                    # event_handled Entity + Service
@@ -303,6 +304,37 @@ curl http://localhost:8085/api/experiment/coupon/result?couponId=1
 | [Outbox Relay 동기 vs 비동기 vs CDC](docs/Outbox%20Relay%20동기%20vs%20비동기%20vs%20CDC%20—%20실무%20판단%20기준.md) | 3가지 방식 비교 + 실무 판단 기준 |
 | [Outbox Relay 최종 트레이드오프](docs/Outbox%20Relay%20최종%20트레이드오프%20—%20동기%20Polling이%20맞는%20이유.md) | 동기 Polling 선택 근거 |
 | [@Transactional 경계 문제 심화](docs/Outbox%20Relay의%20비동기%20vs%20동기%20—%20@Transactional%20경계%20문제%20심화.md) | 비동기 콜백이 TX 밖에서 실행되는 문제 |
+
+### Rebalancing Protocol 비교 실험 (Phase 3 심화)
+
+Eager(RangeAssignor) vs Cooperative(CooperativeStickyAssignor) 리밸런싱을 **동일 환경에서 동시에 실행**하고, `ConsumerRebalanceListener` 콜백 로그로 동작 차이를 실측 비교했습니다.
+
+**실험 구성**: 6개 `@KafkaListener` (Eager 3 + Cooperative 3), 각 `autoStartup=false` → API로 시작/중지 제어
+
+```bash
+# 양쪽 그룹 시작 + 메시지 발행
+curl -X POST localhost:8085/api/experiment/rebalance/start/eager
+curl -X POST localhost:8085/api/experiment/rebalance/start/cooperative
+curl -X POST localhost:8085/api/experiment/rebalance/publish/60
+
+# 초기 로그 정리 후 리밸런싱 트리거
+curl -X DELETE localhost:8085/api/experiment/rebalance/log
+curl -X POST localhost:8085/api/experiment/rebalance/stop/eager-1    # Eager 리밸런싱
+curl -X POST localhost:8085/api/experiment/rebalance/stop/coop-1     # Cooperative 리밸런싱
+
+# 결과 비교
+curl localhost:8085/api/experiment/rebalance/log | python3 -m json.tool
+```
+
+**실측 결과** (2026-04-02, Kafka 3.5.1):
+
+| 관찰 항목 | Eager | Cooperative |
+|-----------|-------|-------------|
+| 살아있는 컨슈머의 REVOKED | **P0, P2 반납** (전원 중단) | **REVOKED 콜백 미호출** (무중단) |
+| stop-the-world 시간 | **~3,273ms** | **0ms** |
+| 리밸런싱 이벤트 수 | 5건 | 3건 |
+
+Eager에서는 **변하지 않는 파티션(P0, P2)까지 반납 후 되찾는** 비용이 3.3초 발생. Cooperative에서는 살아있는 컨슈머의 `onPartitionsRevoked`가 호출되지 않아 기존 처리가 zero 중단.
 
 ### 심화 분석 (2개)
 
